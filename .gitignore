@@ -1,0 +1,22 @@
+# local secrets
+.env
+
+# manifest files
+render-manifests
+
+# local environment
+.venv/
+
+# manager runtime
+services/
+state/
+data/
+logs/
+__pycache__/
+*.pyc
+*.log
+backup_credits.jsonl
+state.json
+known_hosts*
+ssh_key*
+*.db

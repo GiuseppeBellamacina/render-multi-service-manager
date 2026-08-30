@@ -1,0 +1,98 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# services.yaml.example — PUBLIC REFERENCE manifest for render-service-manager
+#
+# The REAL services.yaml is SECRET (gitignored, never published): at boot
+# the manager resolves it in this order:
+#   1. MANIFEST_CONTENT env var  — the whole YAML as an env var (multiline,
+#                                  escaped newlines, like an SSH key on Render)
+#   2. MANIFEST_REPO env var     — a (private) GitHub repository:
+#                                  MANIFEST_BRANCH (default: main) +
+#                                  MANIFEST_PATH (default: services.yaml),
+#                                  fetched via the Contents API with
+#                                  GITHUB_TOKEN
+#   3. a local services.yaml file (development)
+#
+# Copy this file to services.yaml (locally) or upload it to your private
+# manifest repository / MANIFEST_CONTENT, then adapt it to your services.
+# Field reference: README.md - Service conventions: API_GUIDELINES.md
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  # ── Example 1: public repo, tick on every global tick ────────────────────
+  ticker:
+    display_name: Example Ticker
+    description: >-
+      Fetches a value on a schedule and appends it to a log. Demonstrates
+      a public source (raw mode), a sync tick and the every_tick schedule.
+    source:
+      mode: raw                    # public repo -> raw.githubusercontent.com
+      repo: ${TICKER_REPO}         # value comes from the environment
+      branch: main
+      files:
+        - repo_path: app.py
+          dest: ticker/app.py
+    entry: ticker/app.py
+    env:
+      required: [TICKER_TARGET]
+      optional:
+        TICKER_INTERVAL: "60"
+    dependencies: [fastapi, uvicorn, requests]
+    setup: []                      # module functions to call after import
+    api:
+      mount: /ticker               # the service's original APIs live under here
+      auth: manager                # protected by the manager's token
+      public_paths: []
+      endpoints:
+        GET /tick: "tick: fetch one value"
+        GET /status: "current state"
+    actions:
+      tick:
+        function: tick
+        sync: true
+        timeout_s: 60
+      status:
+        function: status
+        sync: true
+        timeout_s: 15
+    schedule:
+      mode: every_tick            # joins every global /tick
+
+  # ── Example 2: private repo, interval schedule, browser dashboard ─────────
+  sampler:
+    display_name: Example Sampler
+    description: >-
+      Samples an external API every 30 minutes and stores the points.
+      Demonstrates a private source (api mode), an async tick, an interval
+      schedule and a public dashboard path.
+    source:
+      mode: api                    # private repo -> Contents API + GITHUB_TOKEN
+      repo: ${SAMPLER_REPO}
+      branch: main
+      files:
+        - repo_path: backend/main.py
+          dest: sampler/main.py
+    entry: sampler/main.py
+    env:
+      required: [SAMPLER_API_KEY]
+      optional: {}
+    dependencies: [fastapi, uvicorn, httpx]
+    setup: []
+    api:
+      mount: /sampler
+      auth: manager
+      public_paths: ["/api/data"]  # browser dashboard (cannot send headers)
+      endpoints:
+        GET /api/cron: "tick: sample + save"
+        GET /api/data: "tick + history (dashboard)"
+    actions:
+      tick:
+        function: cron_check
+        sync: false
+        timeout_s: 45
+      status:
+        function: backup_status
+        sync: false
+        timeout_s: 15
+    schedule:
+      mode: interval_minutes       # sparser than every tick
+      interval_minutes: 30

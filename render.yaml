@@ -1,0 +1,67 @@
+services:
+  - type: web
+    name: render-manager
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      # ── Manager ───────────────────────────────────────────────
+      - key: MANAGER_AUTH_TOKEN      # protects /tick, /fetch and every route (X-Auth-Token header)
+        sync: false
+      - key: SERVICES_ENABLED        # default: all manifest services
+        value: "committer,t2g,credit"
+      - key: DAILY_FETCH             # 1 = automatic daily fetch (default)
+        value: "1"
+      # ── The SECRET manifest (pick ONE) ────────────────────────
+      - key: MANIFEST_CONTENT        # option A: the whole services.yaml as an env var
+        sync: false
+      - key: MANIFEST_REPO           # option B: private GitHub repo with services.yaml
+        sync: false
+      - key: MANIFEST_BRANCH         # option B: branch (default: main)
+        sync: false
+      - key: MANIFEST_PATH           # option B: path in the repo (default: services.yaml)
+        sync: false
+      # ── Service sources (${VAR} placeholders in the manifest) ──
+      - key: COMMITTER_REPO          # e.g. owner/repo (private: needs GITHUB_TOKEN)
+        sync: false
+      - key: CREDIT_REPO             # e.g. owner/repo (private: needs GITHUB_TOKEN)
+        sync: false
+      - key: T2G_REPO                # e.g. owner/repo (public)
+        sync: false
+      # ── Committer ─────────────────────────────────────────────
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO             # target repo for the commits
+        sync: false
+      - key: GITHUB_USERNAME
+        sync: false
+      - key: BASE_COMMITS
+        value: "10"
+      - key: DELTA_COMMITS
+        value: "2"
+      - key: WORK_START_HOUR
+        value: "9"
+      - key: WORK_END_HOUR
+        value: "18"
+      - key: TIMEZONE_OFFSET
+        value: "2"
+      # ── T2G (cluster driver) ──────────────────────────────────
+      - key: T2G_AUTH_TOKEN          # also used by the TUI: X-Auth-Token
+        sync: false
+      - key: T2G_SSH_USER            # user on the cluster login node
+        sync: false
+      - key: T2G_SSH_HOST            # NO ~/.ssh/config aliases inside the container: explicit host
+        sync: false
+      - key: T2G_SSH_KEY_CONTENT     # DEDICATED private key (lines with literal \n)
+        sync: false
+      - key: T2G_SSH_TIMEOUT
+        value: "30"
+      # ── Credit (OpenRouter monitor) ───────────────────────────
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL      # NB: main.py reads UPSTASH_REDIS_URL/TOKEN (not *_REST_*)
+        sync: false
+      - key: UPSTASH_REDIS_TOKEN
+        sync: false
