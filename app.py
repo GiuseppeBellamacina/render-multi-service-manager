@@ -269,6 +269,36 @@ def _today_key() -> str:
     return (_now() + timedelta(hours=TZ_OFFSET_H)).strftime("%Y-%m-%d")
 
 
+# -- Render Secret Files normalization ----------------------------------------
+
+
+def _normalize_ssh_key_file() -> None:
+    """When T2G_SSH_KEY_FILE points to a Render Secret File (under
+    /etc/secrets), copy it to a local file with 0600 permissions and point
+    the env var at the copy: ssh strictly rejects keys with open
+    permissions, and we do not control the Secret File mount's mode.
+    Runs BEFORE the service modules load (they read the env at import)."""
+    key_file = os.environ.get("T2G_SSH_KEY_FILE", "").strip()
+    if not key_file or not key_file.startswith("/etc/secrets/"):
+        return
+    src = Path(key_file)
+    if not src.is_file():
+        _log.warning(
+            "T2G_SSH_KEY_FILE %s not found: the t2g service will fail its ssh",
+            key_file,
+        )
+        return
+    dest = BASE_DIR / "data" / "ssh_key"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    try:
+        os.chmod(dest, 0o600)
+    except OSError:
+        pass
+    os.environ["T2G_SSH_KEY_FILE"] = str(dest)
+    _log.info("ssh key copied from Render secret file to %s (0600)", dest)
+
+
 # -- Service loading (config-driven) ------------------------------------------
 
 REGISTRY: dict[str, dict] = {}  # name -> {ok, error, module}
@@ -549,6 +579,9 @@ def _maybe_restart(payload: dict, state: dict) -> JSONResponse:
 async def lifespan(app: FastAPI):
     SERVICES_DIR.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # normalize a Render Secret File ssh key BEFORE the services load
+    _normalize_ssh_key_file()
 
     # 1) seed from fallbacks (best-effort) 2) fresh fetch (best-effort)
     try:

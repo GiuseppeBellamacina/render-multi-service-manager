@@ -54,7 +54,9 @@ services:
         sync: false
       - key: T2G_SSH_HOST            # NO ~/.ssh/config aliases inside the container: explicit host
         sync: false
-      - key: T2G_SSH_KEY_CONTENT     # DEDICATED private key (lines with literal \n)
+      - key: T2G_SSH_KEY_FILE        # RECOMMENDED: /etc/secrets/<name> of the key uploaded as a Secret File
+        sync: false
+      - key: T2G_SSH_KEY_CONTENT     # alternative to the Secret File: key with literal \n on one line
         sync: false
       - key: T2G_SSH_TIMEOUT
         value: "30"
