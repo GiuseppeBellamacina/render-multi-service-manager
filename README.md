@@ -42,11 +42,12 @@ The manifest is **secret**: it describes your services and their repos, so it is
 
 1. **`MANIFEST_CONTENT`** env var — the whole YAML as an env var (multiline with literal `\n`, exactly like an SSH key on Render);
 2. **`MANIFEST_REPO`** env var — a **private GitHub repository** acting as a manifest deposit: the manager fetches `services.yaml` from it via the Contents API with `GITHUB_TOKEN` (optional `MANIFEST_BRANCH`, default `main`, and `MANIFEST_PATH`, default `services.yaml`);
-3. a **local `services.yaml` file** (development).
+3. **`MANIFEST_FILE`** env var — an explicit file path, e.g. `/etc/secrets/services.yaml` when using a Render Secret File;
+4. a **local `services.yaml` file** (development; a Render Secret File linked at the app root lands here, and `/etc/secrets/services.yaml` is picked up automatically even without `MANIFEST_FILE`).
 
 If none is available, the manager still boots (health OK) but `/status` shows `config_error: services.yaml not found` and no service runs.
 
-On Render the simplest channel is a **Secret File** (dashboard → Environment → Secret Files): upload the plain multiline `services.yaml` with filename `services.yaml` — Render mounts it under `/etc/secrets/` and links it at the app root, so the manager reads it as the local file (and if only the `/etc/secrets` copy exists, the manager copies it from there). With the Secret File in place you can leave `MANIFEST_CONTENT` and `MANIFEST_REPO` unset. The same mechanism works for the t2g SSH key: upload it as a Secret File (e.g. `t2g_driver`, plain multiline key) and set `T2G_SSH_KEY_FILE=/etc/secrets/t2g_driver` — at boot the manager copies it to a local `0600` file, so ssh's strict key-permission check always passes.
+On Render the simplest channel is a **Secret File** (dashboard → Environment → Secret Files): upload the plain multiline `services.yaml` with filename `services.yaml` — Render mounts it under `/etc/secrets/` and links it at the app root, so the manager reads it as the local file (and if only the `/etc/secrets` copy exists, the manager copies it from there). With the Secret File in place you can leave `MANIFEST_CONTENT` and `MANIFEST_REPO` unset (`MANIFEST_FILE=/etc/secrets/services.yaml` makes the pointer explicit — optional). The same mechanism works for the t2g SSH key: upload it as a Secret File (e.g. `t2g_driver`, plain multiline key) and set `T2G_SSH_KEY_FILE=/etc/secrets/t2g_driver` — at boot the manager copies it to a local `0600` file, so ssh's strict key-permission check always passes.
 
 One block per service. Fields:
 
@@ -142,7 +143,7 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 | `DAILY_FETCH` | no | `1` (default) = automatic daily fetch; `0` = manual `/fetch` only |
 | `RESTART_ON_CHANGE` | no | `1` (default) = restart after script updates; set `0` locally |
 | `TIMEZONE_OFFSET` | no | `2` (default) — used for the fetch "day" and by committer |
-| Secret manifest | yes on Render | **Render Secret File** `services.yaml` (recommended, plain YAML) **or** `MANIFEST_CONTENT` **or** `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
+| Secret manifest | yes on Render | **Render Secret File** `services.yaml` (recommended; optional explicit `MANIFEST_FILE=/etc/secrets/services.yaml`) **or** `MANIFEST_CONTENT` **or** `MANIFEST_REPO` (+ `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
 | Service sources | yes | `COMMITTER_REPO`, `CREDIT_REPO`, `T2G_REPO` — fill the manifest's `${VAR}` placeholders |
 | Committer | — | `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_USERNAME`, `BASE_COMMITS` (10), `DELTA_COMMITS` (2), `WORK_START_HOUR` (9), `WORK_END_HOUR` (18) |
 | T2G | — | `T2G_AUTH_TOKEN`, `T2G_SSH_USER`, `T2G_SSH_HOST` (on Render: explicit login node host), `T2G_SSH_KEY_FILE=/etc/secrets/t2g_driver` (Secret File, recommended) or `T2G_SSH_KEY_CONTENT`, `T2G_SSH_TIMEOUT` (30) |

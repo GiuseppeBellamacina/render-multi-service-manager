@@ -113,9 +113,11 @@ def _ensure_manifest() -> None:
     Priority: MANIFEST_CONTENT env var (the whole YAML, literal \\n allowed,
     normalized like T2G_SSH_KEY_CONTENT) > MANIFEST_REPO env var (a private
     GitHub repository: MANIFEST_BRANCH default "main", MANIFEST_PATH default
-    "services.yaml", fetched via the Contents API with GITHUB_TOKEN) > a
-    local services.yaml file (development) > a Render Secret File named
-    services.yaml (mounted under /etc/secrets/, linked at the app root).
+    "services.yaml", fetched via the Contents API with GITHUB_TOKEN) >
+    MANIFEST_FILE env var (an explicit file path, e.g. /etc/secrets/
+    services.yaml for a Render Secret File) > a local services.yaml file
+    (development) > a Render Secret File named services.yaml (mounted under
+    /etc/secrets/, linked at the app root).
     """
     content = os.environ.get("MANIFEST_CONTENT", "")
     if content.strip():
@@ -144,6 +146,23 @@ def _ensure_manifest() -> None:
         except Exception as exc:  # noqa: BLE001 - never block the boot
             _log.error("manifest fetch from %s failed: %s", repo, exc)
         return
+
+    manifest_file = os.environ.get("MANIFEST_FILE", "").strip()
+    if manifest_file:
+        src = Path(manifest_file)
+        if not src.is_file():
+            _log.error("MANIFEST_FILE %s not found", manifest_file)
+            # fall through: the app-root file may still be there
+        elif CONFIG_FILE.is_file() and CONFIG_FILE.resolve() == src.resolve():
+            _log.info("manifest: local services.yaml file (MANIFEST_FILE)")
+            return
+        else:
+            try:
+                CONFIG_FILE.write_bytes(src.read_bytes())
+                _log.info("manifest loaded from MANIFEST_FILE %s", manifest_file)
+            except OSError as exc:
+                _log.warning("manifest copy from %s failed: %s", manifest_file, exc)
+            return
 
     if CONFIG_FILE.is_file():
         _log.info("manifest: local services.yaml file")

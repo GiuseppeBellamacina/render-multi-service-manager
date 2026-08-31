@@ -23,6 +23,8 @@ services:
         sync: false
       - key: MANIFEST_PATH           # option B: path in the repo (default: services.yaml)
         sync: false
+      - key: MANIFEST_FILE           # option C: explicit manifest path (e.g. /etc/secrets/services.yaml for a Secret File)
+        sync: false
       # ── Service sources (${VAR} placeholders in the manifest) ──
       - key: COMMITTER_REPO          # e.g. owner/repo (private: needs GITHUB_TOKEN)
         sync: false
