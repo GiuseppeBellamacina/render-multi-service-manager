@@ -46,6 +46,8 @@ The manifest is **secret**: it describes your services and their repos, so it is
 
 If none is available, the manager still boots (health OK) but `/status` shows `config_error: services.yaml not found` and no service runs.
 
+On Render the simplest channel is a **Secret File** (dashboard → Environment → Secret Files): upload the plain multiline `services.yaml` with filename `services.yaml` — Render mounts it under `/etc/secrets/` and links it at the app root, so the manager reads it as the local file (and if only the `/etc/secrets` copy exists, the manager copies it from there). With the Secret File in place you can leave `MANIFEST_CONTENT` and `MANIFEST_REPO` unset.
+
 One block per service. Fields:
 
 | Field | Meaning |
@@ -125,7 +127,7 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 
 1. **Create a GitHub repository** and push this folder as is (the Dockerfile is already at the root — the build context is the root).
 2. **Render → New → Web Service** → connect the repo (or use the `render.yaml` blueprint: Docker, free plan and the `/health` health check are preconfigured).
-3. **Environment variables** (Render dashboard) — see the table below. **First of all the secret manifest**: set `MANIFEST_CONTENT` (the whole services.yaml) or `MANIFEST_REPO` (your private manifest deposit repo). Then at minimum: `MANAGER_AUTH_TOKEN`, `GITHUB_TOKEN`, `COMMITTER_REPO`, `CREDIT_REPO`, `T2G_REPO`, `T2G_AUTH_TOKEN`, `T2G_SSH_USER`, `T2G_SSH_HOST`, `T2G_SSH_KEY_CONTENT`, `OPENROUTER_API_KEY`, `UPSTASH_REDIS_URL`, `UPSTASH_REDIS_TOKEN` (the committer numeric defaults are already in the blueprint).
+3. **Environment / Secret Files** (Render dashboard) — see the table below. **First of all the secret manifest**: upload it as a **Secret File** named `services.yaml` (Environment → Secret Files; plain multiline YAML, no escaping) — recommended — or set `MANIFEST_CONTENT` / `MANIFEST_REPO`. Then at minimum: `MANAGER_AUTH_TOKEN`, `GITHUB_TOKEN`, `COMMITTER_REPO`, `CREDIT_REPO`, `T2G_REPO`, `T2G_AUTH_TOKEN`, `T2G_SSH_USER`, `T2G_SSH_HOST`, `T2G_SSH_KEY_CONTENT`, `OPENROUTER_API_KEY`, `UPSTASH_REDIS_URL`, `UPSTASH_REDIS_TOKEN` (the committer numeric defaults are already in the blueprint).
 4. **Dedicated SSH key** for the cluster login node: `ssh-keygen -t ed25519 -f ~/.ssh/t2g_driver -N ""`, authorize it on the cluster, then paste it on Render with literal `\n`: `awk '{printf "%s\\n", $0}' ~/.ssh/t2g_driver`.
 5. **cron-job.org**: ONE cron job, every 5 minutes, `GET https://<service>.onrender.com/tick` with header `X-Auth-Token: <MANAGER_AUTH_TOKEN>` and a generous timeout (90-120 s, cold starts).
 6. **Shut down the old services** and their crons (the manager replaces them).
@@ -140,7 +142,7 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 | `DAILY_FETCH` | no | `1` (default) = automatic daily fetch; `0` = manual `/fetch` only |
 | `RESTART_ON_CHANGE` | no | `1` (default) = restart after script updates; set `0` locally |
 | `TIMEZONE_OFFSET` | no | `2` (default) — used for the fetch "day" and by committer |
-| Secret manifest | yes on Render | `MANIFEST_CONTENT` (whole YAML) **or** `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`, private repo deposit) |
+| Secret manifest | yes on Render | **Render Secret File** `services.yaml` (recommended, plain YAML) **or** `MANIFEST_CONTENT` **or** `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
 | Service sources | yes | `COMMITTER_REPO`, `CREDIT_REPO`, `T2G_REPO` — fill the manifest's `${VAR}` placeholders |
 | Committer | — | `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_USERNAME`, `BASE_COMMITS` (10), `DELTA_COMMITS` (2), `WORK_START_HOUR` (9), `WORK_END_HOUR` (18) |
 | T2G | — | `T2G_AUTH_TOKEN`, `T2G_SSH_USER`, `T2G_SSH_HOST` (on Render: explicit login node host), `T2G_SSH_KEY_CONTENT`, `T2G_SSH_TIMEOUT` (30) |

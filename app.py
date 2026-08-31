@@ -114,7 +114,8 @@ def _ensure_manifest() -> None:
     normalized like T2G_SSH_KEY_CONTENT) > MANIFEST_REPO env var (a private
     GitHub repository: MANIFEST_BRANCH default "main", MANIFEST_PATH default
     "services.yaml", fetched via the Contents API with GITHUB_TOKEN) > a
-    local services.yaml file (development).
+    local services.yaml file (development) > a Render Secret File named
+    services.yaml (mounted under /etc/secrets/, linked at the app root).
     """
     content = os.environ.get("MANIFEST_CONTENT", "")
     if content.strip():
@@ -146,12 +147,21 @@ def _ensure_manifest() -> None:
 
     if CONFIG_FILE.is_file():
         _log.info("manifest: local services.yaml file")
-    else:
-        _log.error(
-            "manifest not found: provide services.yaml locally, or set "
-            "MANIFEST_CONTENT, or set MANIFEST_REPO (+ MANIFEST_BRANCH/"
-            "MANIFEST_PATH)"
+        return
+    # Render Secret Files: uploaded via the dashboard, mounted under
+    # /etc/secrets (and normally linked at the app root too).
+    secret_manifest = Path("/etc/secrets/services.yaml")
+    if secret_manifest.is_file():
+        CONFIG_FILE.write_bytes(secret_manifest.read_bytes())
+        _log.info(
+            "manifest loaded from Render secret file /etc/secrets/services.yaml"
         )
+        return
+    _log.error(
+        "manifest not found: provide services.yaml locally, or set "
+        "MANIFEST_CONTENT, or set MANIFEST_REPO, or upload it as a "
+        "Render Secret File named services.yaml"
+    )
 
 
 def _load_config() -> dict:
