@@ -685,14 +685,15 @@ app.add_middleware(AuthMiddleware)
 # -- Manager endpoints -----------------------------------------------------------
 
 
-@app.get("/")
-def root() -> dict:
+@app.get("/info")
+def info() -> dict:
+    """Service info (the tick endpoint is at / and /tick)."""
     return {
         "service": "render-service-manager",
         "config_error": CONFIG_ERROR,
         "docs": "/docs",
         "endpoints": {
-            "tick": "GET|POST /tick - global tick (external cron, every 5 min)",
+            "tick": "GET|POST / and /tick - global tick (external cron, every 5 min)",
             "fetch": "GET /fetch - update the scripts from GitHub immediately",
             "services": "GET /services - service list from the manifest",
             "service_action": "GET|POST /services/{name}/{action} - one service's action",
@@ -709,11 +710,14 @@ def root() -> dict:
     }
 
 
+@app.get("/")
+@app.post("/")
 @app.get("/tick")
 @app.post("/tick")
 async def tick() -> JSONResponse:
-    """Global tick: daily fetch (on the first tick of the day) + the tick of
-    ALL services per their schedule. Lock: never overlapping ticks."""
+    """Global tick (at / and /tick): daily fetch (on the first tick of the
+    day) + the tick of ALL services per their schedule. Lock: never
+    overlapping ticks."""
     if TICK_LOCK.locked():
         return JSONResponse(
             {"ok": False, "error": "previous tick still in progress"}, status_code=409
