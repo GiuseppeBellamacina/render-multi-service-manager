@@ -327,7 +327,15 @@ REGISTRY: dict[str, dict] = {}  # name -> {ok, error, module}
 
 def _validate_env(name: str, envspec: dict) -> str | None:
     """Missing required vars -> a clear error message (service disabled,
-    without even importing it). Optional with default -> setdefault in env."""
+    without even importing it). Optional with default -> setdefault in env.
+
+    Internal derivation: the committer's code reads GITHUB_REPO, but that's
+    always the same repo as COMMITTER_REPO — derive it transparently so the
+    user never has to set a duplicate variable."""
+    if name == "committer" and not os.environ.get("GITHUB_REPO"):
+        cr = os.environ.get("COMMITTER_REPO", "")
+        if cr:
+            os.environ["GITHUB_REPO"] = cr
     missing = [v for v in (envspec.get("required") or []) if not os.environ.get(v)]
     if missing:
         return f"missing environment variables: {', '.join(missing)}"
