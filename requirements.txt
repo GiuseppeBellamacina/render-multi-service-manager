@@ -5,3 +5,4 @@ httpx>=0.27,<1.0
 upstash-redis>=0.30
 python-dotenv>=1.0
 PyYAML>=6.0
+textual>=8.0
