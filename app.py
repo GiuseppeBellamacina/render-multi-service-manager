@@ -61,6 +61,7 @@ except ImportError:  # pragma: no cover
 import sources
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -676,8 +677,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not MANAGER_AUTH_TOKEN:
             return await call_next(request)
         path = request.url.path
-        if path == "/health" or any(
-            path.startswith(p) for p in PUBLIC_PREFIXES
+        if (
+            path == "/health"
+            or any(path.startswith(p) for p in PUBLIC_PREFIXES)
+            or path.startswith("/credit/api/")  # browser dashboard: original service had zero auth
         ):
             return await call_next(request)
         token = request.headers.get("x-auth-token", "")
@@ -690,6 +693,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(AuthMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # -- Manager endpoints -----------------------------------------------------------
