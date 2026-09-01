@@ -328,11 +328,6 @@ REGISTRY: dict[str, dict] = {}  # name -> {ok, error, module}
 def _validate_env(name: str, envspec: dict) -> str | None:
     """Missing required vars -> a clear error message (service disabled,
     without even importing it). Optional with default -> setdefault in env."""
-    # convenience: GITHUB_REPO defaults to COMMITTER_REPO (always the same repo)
-    if name == "committer" and not os.environ.get("GITHUB_REPO"):
-        cr = os.environ.get("COMMITTER_REPO", "")
-        if cr:
-            os.environ["GITHUB_REPO"] = cr
     missing = [v for v in (envspec.get("required") or []) if not os.environ.get(v)]
     if missing:
         return f"missing environment variables: {', '.join(missing)}"
@@ -692,22 +687,20 @@ app.add_middleware(AuthMiddleware)
 # -- Manager endpoints -----------------------------------------------------------
 
 
-@app.get("/info")
-def info() -> dict:
-    """Service info (the tick endpoint is at / and /tick)."""
+@app.get("/")
+def root() -> dict:
+    """Service info: what the manager is and which endpoints are available."""
     return {
         "service": "render-service-manager",
+        "version": "2.0.0",
         "config_error": CONFIG_ERROR,
         "docs": "/docs",
-        "endpoints": {
-            "tick": "GET|POST / and /tick - global tick (external cron, every 5 min)",
-            "fetch": "GET /fetch - update the scripts from GitHub immediately",
-            "services": "GET /services - service list from the manifest",
-            "service_action": "GET|POST /services/{name}/{action} - one service's action",
-            "service_info": "GET /services/{name} - detail of one service",
-            "status": "GET /status - manager state + last tick",
-            "health": "GET /health - health check (no auth)",
-        },
+        "health": "/health (no auth — used by Render)",
+        "tick": "GET|POST /tick — run all services (external cron, every 5 min)",
+        "fetch": "GET /fetch — force-update scripts from GitHub immediately",
+        "status": "GET /status — manager state + per-service health + last tick",
+        "services": "GET /services — manifest service list",
+        "service_action": "GET|POST /services/{name}/{action} — one service's action",
         "mounted": [
             f"{(s.get('api') or {}).get('mount', '')} -> {s.get('display_name', n)}"
             for n, s in SERVICES.items()
@@ -717,14 +710,11 @@ def info() -> dict:
     }
 
 
-@app.get("/")
-@app.post("/")
 @app.get("/tick")
 @app.post("/tick")
 async def tick() -> JSONResponse:
-    """Global tick (at / and /tick): daily fetch (on the first tick of the
-    day) + the tick of ALL services per their schedule. Lock: never
-    overlapping ticks."""
+    """Global tick: daily fetch (on the first tick of the day) + the tick of
+    ALL services per their schedule. Lock: never overlapping ticks."""
     if TICK_LOCK.locked():
         return JSONResponse(
             {"ok": False, "error": "previous tick still in progress"}, status_code=409
@@ -748,10 +738,53 @@ async def tick() -> JSONResponse:
         }
         _save_state(state)
 
+        # Human-readable summary for quick scanning
+        summary_lines: list[str] = []
+        ok_count = 0
+        err_count = 0
+        skip_count = 0
+        for name in SERVICES:
+            r = results.get(name, {})
+            spec = SERVICES.get(name, {})
+            display = spec.get("display_name", name)
+            if r.get("skipped"):
+                reason = r.get("reason", "unknown")
+                summary_lines.append(f"  {display}: SKIPPED — {reason}")
+                skip_count += 1
+            elif r.get("ok"):
+                ms = r.get("ms", 0)
+                data = r.get("data", {})
+                # extract a service-specific one-liner
+                hint = ""
+                if isinstance(data, dict):
+                    if "status" in data and data["status"] == "sleeping":
+                        hint = "sleeping (outside working hours)"
+                    elif "cluster_reachable" in data:
+                        hint = f"cluster {'reachable' if data['cluster_reachable'] else 'UNREACHABLE'}"
+                    elif "entry" in data and isinstance(data["entry"], dict):
+                        bal = data["entry"].get("balance")
+                        if bal is not None:
+                            hint = f"balance ${bal}"
+                summary_lines.append(f"  {display}: OK ({ms}ms){f' — {hint}' if hint else ''}")
+                ok_count += 1
+            else:
+                err = r.get("error", "unknown")
+                # truncate long errors
+                err_short = err[:120] + "..." if len(err) > 120 else err
+                summary_lines.append(f"  {display}: ERROR — {err_short}")
+                err_count += 1
+
+        all_ok = err_count == 0 and skip_count == 0
+        all_ok_or_skipped = err_count == 0
+
+        summary_lines.insert(0, f"Services: {ok_count} ok, {err_count} error, {skip_count} skipped")
+
         payload = {
-            "ok": all(r.get("ok") for r in results.values() if not r.get("skipped")),
+            "ok": all_ok_or_skipped,
+            "ok_all": all_ok,
             "ts": _now().isoformat(),
             "fetch": fetch_info,
+            "summary": "\n".join(summary_lines),
             "services": results,
         }
         _log.info(
