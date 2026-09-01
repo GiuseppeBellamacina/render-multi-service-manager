@@ -309,7 +309,9 @@ def _normalize_ssh_key_file() -> None:
         return
     dest = BASE_DIR / "data" / "ssh_key"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(src.read_bytes())
+    # Windows CRLF in the key would break ssh on Linux ("error in libcrypto")
+    content = src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    dest.write_bytes(content)
     try:
         os.chmod(dest, 0o600)
     except OSError:
