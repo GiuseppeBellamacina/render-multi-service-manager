@@ -201,8 +201,8 @@ class ManagerTUI(App):
                 with Container():
                     yield Static("[dim]Pick a service and an action — both lists are populated from the live manifest.[/dim]")
                     yield Horizontal(
-                        Select([], id="service-select", allow_blank=False),
-                        Select([], id="action-select", allow_blank=False),
+                        Select([("Loading...", "loading")], id="service-select", allow_blank=True),
+                        Select([("Loading...", "loading")], id="action-select", allow_blank=True),
                         id="service-select-row",
                     )
                     yield Static(id="service-result", markup=True)
