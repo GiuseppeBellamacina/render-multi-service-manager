@@ -215,7 +215,7 @@ class ManagerTUI(App):
                         id="src-select-row",
                     )
                     yield Static(id="src-meta", markup=True)
-                    yield Static(id="src-content", markup=True)
+                    yield Static(id="src-content")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -584,7 +584,7 @@ class ManagerTUI(App):
             display = "\n".join(lines[:200]) + f"\n\n... ({n_lines - 200} more lines truncated)"
         else:
             display = content
-        content_w.update(f"[dim]{display}[/]")
+        content_w.update(display)
 
 
 # ── entry point ──
