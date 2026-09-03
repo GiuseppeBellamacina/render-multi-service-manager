@@ -206,10 +206,36 @@ class ManagerTUI(App):
                         id="service-select-row",
                     )
                     yield Static(id="service-result", markup=True)
+            with TabPane("Sources", id="tab-sources"):
+                with Container():
+                    yield Static("[dim]Browse the source files of each service (fetched live from GitHub). Pick a service, then a file.[/dim]")
+                    yield Horizontal(
+                        Select([("Loading...", "loading")], id="src-service-select", allow_blank=True),
+                        Select([("Loading...", "loading")], id="src-file-select", allow_blank=True),
+                        id="src-select-row",
+                    )
+                    yield Static(id="src-meta", markup=True)
+                    yield Static(id="src-content", markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
         self.refresh_dashboard()
+
+    def _fetch_source_file(self, repo: str, branch: str, path: str, mode: str) -> dict:
+        """Fetch a single source file from GitHub (raw or Contents API)."""
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if mode == "raw":
+            url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
+            headers = {}
+        else:
+            url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+            headers = {"Accept": "application/vnd.github.raw"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        r = httpx.get(url, headers=headers, timeout=30)
+        if r.status_code != 200:
+            return {"error": f"HTTP {r.status_code}", "content": ""}
+        return {"content": r.text, "bytes": len(r.content)}
 
     # ── actions ──
 
@@ -246,17 +272,27 @@ class ManagerTUI(App):
         self._services_cache = services_data.get("services", {})
 
         # populate Service tab dropdowns
+        first_svc = list(self._services_cache.keys())[0] if self._services_cache else ""
         try:
             svc_select = self.query_one("#service-select", Select)
             act_select = self.query_one("#action-select", Select)
             svc_options = [(s.get("display_name", n), n) for n, s in self._services_cache.items()]
             svc_select.set_options(svc_options)
-            first_svc = list(self._services_cache.keys())[0] if self._services_cache else ""
             first_actions = sorted((self._services_cache.get(first_svc, {}).get("actions") or []))
             act_select.set_options([(a, a) for a in first_actions])
         except Exception:
             pass  # dropdowns may not be mounted yet
 
+        # populate Sources tab dropdowns
+        try:
+            src_svc_select = self.query_one("#src-service-select", Select)
+            src_svc_options = [(s.get("display_name", n), n) for n, s in self._services_cache.items()]
+            src_svc_select.set_options(src_svc_options)
+            first_files = [f for f in (self._services_cache.get(first_svc, {}).get("source", {}).get("files") or [])]
+            src_file_select = self.query_one("#src-file-select", Select)
+            src_file_select.set_options([(f, f) for f in first_files])
+        except Exception:
+            pass
         # info
         ok = health.get("status") == "ok"
         health_icon = "[green]OK[/]" if ok else "[red]DOWN[/]"
@@ -441,12 +477,23 @@ class ManagerTUI(App):
             act_select = self.query_one("#action-select", Select)
             act_select.set_options([(a, a) for a in actions])
         elif event.select.id == "action-select":
-            # action selected — run it
             svc_select = self.query_one("#service-select", Select)
             svc_name = str(svc_select.value)
             action_name = str(event.value)
             if svc_name and action_name:
                 self._run_service_action(svc_name, action_name)
+        elif event.select.id == "src-service-select":
+            svc_name = str(event.value)
+            svc = self._services_cache.get(svc_name, {})
+            files = svc.get("source", {}).get("files") or []
+            src_file_select = self.query_one("#src-file-select", Select)
+            src_file_select.set_options([(f, f) for f in files])
+        elif event.select.id == "src-file-select":
+            src_svc_select = self.query_one("#src-service-select", Select)
+            svc_name = str(src_svc_select.value)
+            file_dest = str(event.value)
+            if svc_name and file_dest:
+                self._load_source_file(svc_name, file_dest)
 
     @work
     async def _run_service_action(self, svc_name: str, action_name: str) -> None:
@@ -468,6 +515,53 @@ class ManagerTUI(App):
             body_str = str(body)[:2000]
         icon = "[green]200[/]" if code == 200 else f"[red]{code}[/]"
         result.update(f"  {icon}  /services/{svc_name}/{action_name}\n\n[dim]{body_str}[/]")
+
+    # ── source file viewer ──
+
+    @work
+    async def _load_source_file(self, svc_name: str, file_dest: str) -> None:
+        meta_w = self.query_one("#src-meta", Static)
+        content_w = self.query_one("#src-content", Static)
+        meta_w.update("[dim]Fetching...[/]")
+        content_w.update("")
+        svc = self._services_cache.get(svc_name, {})
+        src = svc.get("source", {})
+        repo = src.get("repo", "")
+        branch = src.get("branch", "main")
+        mode = src.get("mode", "raw")
+        # find the repo_path for this dest
+        repo_path = file_dest
+        for f in (src.get("files") or []):
+            if f == file_dest:
+                repo_path = f
+                break
+        try:
+            r = self._fetch_source_file(repo, branch, repo_path, mode)
+        except Exception as exc:
+            meta_w.update(f"[red]Error: {exc}[/]")
+            return
+        if "error" in r:
+            meta_w.update(f"[red]{r['error']}[/]")
+            return
+        content = r.get("content", "")
+        size_bytes = r.get("bytes", len(content.encode()))
+        lines = content.splitlines()
+        n_lines = len(lines)
+        # detect language from extension
+        ext = Path(file_dest).suffix
+        lang_map = {".py": "Python", ".sh": "Shell", ".yaml": "YAML", ".yml": "YAML", ".js": "JavaScript", ".html": "HTML"}
+        lang = lang_map.get(ext, "text")
+        meta_w.update(
+            f"  Service: [bold cyan]{svc_name}[/]  File: [bold]{file_dest}[/]\n"
+            f"  Repo: [dim]{repo}[/]  Branch: [dim]{branch}[/]  Mode: [dim]{mode}[/]\n"
+            f"  Language: {lang}  Size: {size_bytes:,} bytes  Lines: {n_lines}"
+        )
+        # show first 200 lines (keep TUI responsive)
+        if n_lines > 200:
+            display = "\n".join(lines[:200]) + f"\n\n... ({n_lines - 200} more lines truncated)"
+        else:
+            display = content
+        content_w.update(f"[dim]{display}[/]")
 
 
 # ── entry point ──
