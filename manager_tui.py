@@ -529,14 +529,37 @@ class ManagerTUI(App):
         repo = src.get("repo", "")
         branch = src.get("branch", "main")
         mode = src.get("mode", "raw")
-        # find the repo_path for this dest
+        # the /services endpoint returns dest paths; we need the repo_path
+        # from the manifest. Since /services doesn't expose repo_path,
+        # we fetch the manifest's source.files mapping via the live /services
+        # detail endpoint which returns the full source block.
+        # Fallback: try the dest as-is, then try common remapping (dest → repo_path
+        # is usually the same for simple services; for t2g it differs).
+        # Best approach: fetch the raw file trying both dest and known prefixes.
         repo_path = file_dest
-        for f in (src.get("files") or []):
-            if f == file_dest:
-                repo_path = f
-                break
+        # try the dest path first
         try:
             r = self._fetch_source_file(repo, branch, repo_path, mode)
+            if "error" in r:
+                # remap common dest → repo_path patterns
+                remaps = [
+                    ("t2g/app.py", "remote/app.py"),
+                    ("t2g/cluster_helper.sh", "remote/cluster_helper.sh"),
+                    ("committer/app.py", "app.py"),
+                    ("credit/main.py", "backend/main.py"),
+                ]
+                for dest_prefix, repo_prefix in remaps:
+                    if file_dest == dest_prefix:
+                        repo_path = repo_prefix
+                        break
+                else:
+                    # generic: strip the service-name folder prefix
+                    parts = file_dest.split("/", 1)
+                    if len(parts) == 2:
+                        repo_path = parts[1]
+                    else:
+                        repo_path = file_dest
+                r = self._fetch_source_file(repo, branch, repo_path, mode)
         except Exception as exc:
             meta_w.update(f"[red]Error: {exc}[/]")
             return
