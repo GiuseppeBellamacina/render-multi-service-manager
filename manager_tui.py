@@ -215,7 +215,7 @@ class ManagerTUI(App):
                         id="src-select-row",
                     )
                     yield Static(id="src-meta", markup=True)
-                    yield Static(id="src-content")
+                    yield Static(id="src-content", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
