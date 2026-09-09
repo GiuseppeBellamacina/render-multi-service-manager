@@ -1,0 +1,15 @@
+.env
+.venv
+logs
+services
+state
+data
+__pycache__
+*.pyc
+.git
+*.log
+backup_credits.jsonl
+state.json
+session-*.md
+services.yaml
+render-manifests

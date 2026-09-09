@@ -1,0 +1,90 @@
+[project]
+name = "render-service-manager"
+version = "2.0.0"
+description = "Single Render service that hosts and schedules multiple remote services from a manifest"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "requests>=2.31,<3",
+    "httpx>=0.27,<1.0",
+    "upstash-redis>=0.30",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "textual>=8.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16",
+    "black>=25.0",
+    "isort>=7.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.isort]
+profile = "black"
+line_length = 88
+extend_skip = [".venv", "services", "fallback"]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+extend-exclude = '''
+/(
+    \.venv
+  | services
+  | fallback
+)/
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = [".venv", "services", "fallback"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "PERF", # perflint
+    "DTZ",  # flake8-datetimez
+    "PIE",  # flake8-pie
+    "RUF",  # ruff-specific
+]
+ignore = [
+    # Black owns line breaking; it does not split long string literals, so
+    # E501 would only ever flag strings/comments it deliberately left alone.
+    "E501",
+    # This codebase catches broad exceptions ON PURPOSE. The manager must
+    # never crash a whole deployment because one downloaded service module
+    # misbehaves, and the TUI must never die on a widget query or a cold
+    # backend. Both are documented at every site and reported to the user
+    # instead of being swallowed silently, so BLE001/S110-style rules would
+    # only produce noise here.
+    "BLE001",
+]
+
+# Status glyphs used by the TUI on purpose (○ disabled, ● loaded, × failed).
+# RUF001 flags `×` as confusable with `x`, which is irrelevant for a glyph that
+# is never typed or parsed — only rendered.
+allowed-confusables = ["×"]
+
+[tool.ruff.lint.per-file-ignores]
+# The TUI legitimately ignores failures from optional UI work (a widget that
+# is not mounted yet, an unreadable clipboard, ...) where there is nothing
+# useful to report and no state to roll back.
+#
+# SIM117: inside `compose()` the nested `with` blocks ARE the widget tree —
+# their indentation mirrors the layout hierarchy one-to-one. Collapsing them
+# into comma-separated context managers would save lines while making the UI
+# structure unreadable.
+"manager_tui.py" = ["S110", "SIM105", "SIM117"]
