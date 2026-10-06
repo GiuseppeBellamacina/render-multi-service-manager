@@ -1,5 +1,7 @@
 # render-service-manager
 
+![TUI](assets/screenshot.png)
+
 A single, config-driven service manager for scheduled services on **Render free tier** (512 MB). One process, one URL for the external cron, one file to touch when something changes: `services.yaml`.
 
 ```
@@ -13,7 +15,7 @@ cron-job.org ──GET/POST /tick (X-Auth-Token)──▶  Render (Docker, singl
 
 ## Why Docker
 
-A managed service may need `ssh`/`scp` at runtime (for example to reach a remote host over SSH): it runs them **via subprocess**, so the binaries must exist in the runtime. Render's official docs list the tools shipped with the *native* Python runtime (Debian 12: curl, git, rsync, ...) and **`ssh`/`scp` are not among them**, nor is there a supported way to install system packages in the native runtime ([native runtimes — tools and utilities](https://render.com/docs/native-runtimes#tools-and-utilities)). With Docker, the `Dockerfile` installs `openssh-client` explicitly — guaranteed. Free tier RAM is the same 512 MB in both runtimes ([compute plans](https://render.com/docs/compute-plans)).
+A managed service may need `ssh`/`scp` at runtime (for example to reach a remote host over SSH): it runs them **via subprocess**, so the binaries must exist in the runtime. Render's official docs list the tools shipped with the _native_ Python runtime (Debian 12: curl, git, rsync, ...) and **`ssh`/`scp` are not among them**, nor is there a supported way to install system packages in the native runtime ([native runtimes — tools and utilities](https://render.com/docs/native-runtimes#tools-and-utilities)). With Docker, the `Dockerfile` installs `openssh-client` explicitly — guaranteed. Free tier RAM is the same 512 MB in both runtimes ([compute plans](https://render.com/docs/compute-plans)).
 
 **Does Docker start automatically on Render?** Yes. A Docker web service is built and launched by the platform on every deploy or restart — you never start it manually. This is also what backs the manager's restart-on-script-update: the process exits after flushing the response, and Render relaunches the container with the fresh code. (Local Docker Desktop, by contrast, must be started by you for local container tests.)
 
@@ -51,23 +53,23 @@ On Render the simplest channel is a **Secret File** (dashboard → Environment �
 
 One block per service. Fields:
 
-| Field | Meaning |
-|---|---|
-| `display_name`, `description` | Presentation (shown in `GET /services`) |
-| `source.mode` | `raw` (public repo, no token) or `api` (private repo: Contents API + `GITHUB_TOKEN`) |
-| `source.repo`, `source.branch` | Where to fetch from — `${VAR}` placeholders supported |
-| `source.files[]` | `repo_path` → `dest` pairs (`dest` lives under `services/`) |
-| `entry` | The main script imported as a module |
-| `env.required` | If even one variable is missing → the service is disabled with a clear message |
-| `env.optional` | Defaults applied via `setdefault` when the variable is unset |
-| `dependencies` | Informational: the manager checks they are installed and warns |
-| `setup_dirs`, `setup[]` | mkdir + functions called after import (lifespan equivalent) |
-| `api.mount` | Where the original sub-app is mounted (e.g. `/sampler`) |
-| `api.auth` | `manager` (manager token) or `service` (the service has its own internal auth) |
-| `api.public_paths` | Paths exempt from the manager token (e.g. a browser dashboard that cannot send headers) |
-| `api.endpoints` | Documentation of the original routes (shown in `GET /services/{name}`) |
-| `actions` | Uniform actions: name → `{function, sync, timeout_s}` → `GET|POST /services/{name}/{action}` |
-| `schedule.mode` | `every_tick` · `interval_minutes` (+ `interval_minutes: N`) · `disabled` |
+| Field                          | Meaning                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| `display_name`, `description`  | Presentation (shown in`GET /services`)                                                  |
+| `source.mode`                  | `raw` (public repo, no token) or `api` (private repo: Contents API + `GITHUB_TOKEN`)    |
+| `source.repo`, `source.branch` | Where to fetch from —`${VAR}` placeholders supported                                    |
+| `source.files[]`               | `repo_path` → `dest` pairs (`dest` lives under `services/`)                             |
+| `entry`                        | The main script imported as a module                                                    |
+| `env.required`                 | If even one variable is missing → the service is disabled with a clear message          |
+| `env.optional`                 | Defaults applied via`setdefault` when the variable is unset                             |
+| `dependencies`                 | Informational: the manager checks they are installed and warns                          |
+| `setup_dirs`, `setup[]`        | mkdir + functions called after import (lifespan equivalent)                             |
+| `api.mount`                    | Where the original sub-app is mounted (e.g.`/sampler`)                                  |
+| `api.auth`                     | `manager` (manager token) or `service` (the service has its own internal auth)          |
+| `api.public_paths`             | Paths exempt from the manager token (e.g. a browser dashboard that cannot send headers) |
+| `api.endpoints`                | Documentation of the original routes (shown in`GET /services/{name}`)                   |
+| `actions`                      | Uniform actions: name →`{function, sync, timeout_s}` → `GET                             |
+| `schedule.mode`                | `every_tick` · `interval_minutes` (+ `interval_minutes: N`) · `disabled`                |
 
 ### `${VAR}` placeholders
 
@@ -75,26 +77,30 @@ The published manifest contains no personal data: repos, owners and hosts live o
 
 ## Manager endpoints
 
-| Endpoint | Description |
-|---|---|
-| `GET\|POST /tick` | **The external cron calls this every 5 minutes.** Runs every service's tick according to its schedule, plus the daily fetch on the first tick of the day. Overlap lock (409 if the previous tick is still running) |
-| `GET /fetch` | Updates the scripts from GitHub immediately; if content changed → clean restart that reloads the code (10-minute anti-flapping guard) |
-| `GET /services` | Service list from the manifest, with load status |
-| `GET /services/{name}` | Detail of one service |
-| `GET\|POST /services/{name}/{action}` | A single service's action: e.g. `GET /services/sampler/status`, `POST /services/ticker/tick` |
-| `GET /status` | Aggregate state: services + last tick + per-service status |
-| `GET /health` | Health check (no auth) — used by Render |
-| `/{name}/...` | The service's ORIGINAL APIs, mounted 1:1 (e.g. `GET /sampler/api/data`) |
+| Endpoint                              | Description                                                                                                                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET\|POST /tick`                     | **The external cron calls this every 5 minutes.** Runs every service's tick according to its schedule, plus the daily fetch on the first tick of the day. Overlap lock (409 if the previous tick is still running) |
+| `GET /fetch`                          | Updates the scripts from GitHub immediately; if content changed → clean restart that reloads the code (10-minute anti-flapping guard)                                                                              |
+| `GET /services`                       | Service list from the manifest, with load status                                                                                                                                                                   |
+| `GET /services/{name}`                | Detail of one service                                                                                                                                                                                              |
+| `GET\|POST /services/{name}/{action}` | A single service's action: e.g.`GET /services/sampler/status`, `POST /services/ticker/tick`                                                                                                                        |
+| `GET /status`                         | Aggregate state: services + last tick + per-service status                                                                                                                                                         |
+| `GET /health`                         | Health check (no auth) — used by Render                                                                                                                                                                            |
+| `/{name}/...`                         | The service's ORIGINAL APIs, mounted 1:1 (e.g.`GET /sampler/api/data`)                                                                                                                                             |
 
 `/tick` response (illustrative — the `data` payloads come from your services):
 
 ```json
 {
   "ok": true,
-  "fetch": {"skipped": true},
+  "fetch": { "skipped": true },
   "services": {
-    "ticker":  {"ok": true, "ms": 12,  "data": {"status": "ok", "value": 42}},
-    "sampler": {"ok": true, "ms": 324, "data": {"status": "ok", "samples": 57}}
+    "ticker": { "ok": true, "ms": 12, "data": { "status": "ok", "value": 42 } },
+    "sampler": {
+      "ok": true,
+      "ms": 324,
+      "data": { "status": "ok", "samples": 57 }
+    }
   }
 }
 ```
@@ -135,15 +141,15 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 
 ## Environment variables
 
-| Variable | Required | Notes |
-|---|---|---|
-| `MANAGER_AUTH_TOKEN` | recommended | Protects every route except `/health` and the `public_paths` |
-| `SERVICES_ENABLED` | no | Default: all services. Comma-separated manifest ids to run a subset (e.g. `ticker,sampler`); set to an empty value to run none |
-| `DAILY_FETCH` | no | `1` (default) = automatic daily fetch; `0` = manual `/fetch` only |
-| `RESTART_ON_CHANGE` | no | `1` (default) = restart after script updates; set `0` locally |
-| Secret manifest | yes on Render | **Render Secret File** `services.yaml` (recommended; optional explicit `MANIFEST_FILE=/etc/secrets/services.yaml`) **or** `MANIFEST_CONTENT` **or** `MANIFEST_REPO` (+ `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
-| Service sources | yes | One env var per `${VAR}` placeholder in the manifest (e.g. `TICKER_REPO`, `SAMPLER_REPO`) |
-| Service-specific vars | per service | Declared in the manifest's `env.required` / `env.optional` (e.g. `TICKER_TARGET`, `SAMPLER_API_KEY`). Prefix them with the service name to avoid collisions |
+| Variable              | Required      | Notes                                                                                                                                                                                                     |
+| --------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MANAGER_AUTH_TOKEN`  | recommended   | Protects every route except`/health` and the `public_paths`                                                                                                                                               |
+| `SERVICES_ENABLED`    | no            | Default: all services. Comma-separated manifest ids to run a subset (e.g.`ticker,sampler`); set to an empty value to run none                                                                             |
+| `DAILY_FETCH`         | no            | `1` (default) = automatic daily fetch; `0` = manual `/fetch` only                                                                                                                                         |
+| `RESTART_ON_CHANGE`   | no            | `1` (default) = restart after script updates; set `0` locally                                                                                                                                             |
+| Secret manifest       | yes on Render | **Render Secret File** `services.yaml` (recommended; optional explicit `MANIFEST_FILE=/etc/secrets/services.yaml`) **or** `MANIFEST_CONTENT` **or** `MANIFEST_REPO` (+ `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
+| Service sources       | yes           | One env var per`${VAR}` placeholder in the manifest (e.g. `TICKER_REPO`, `SAMPLER_REPO`)                                                                                                                  |
+| Service-specific vars | per service   | Declared in the manifest's`env.required` / `env.optional` (e.g. `TICKER_TARGET`, `SAMPLER_API_KEY`). Prefix them with the service name to avoid collisions                                                |
 
 ## How updates work
 
@@ -159,12 +165,12 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `/status` shows `config_error: services.yaml not found` | no manifest on Render | set `MANIFEST_CONTENT` or `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
-| Service `"loaded": false` in `/services` | missing env vars or import error | the `error` field says exactly what is missing |
-| `POST /<service>/...` → 502 remote host unreachable | ssh key/host/user issues | check that service's ssh env vars and the key Secret File on Render |
-| `fetch` errors 404 in `/tick` | private repo unreachable with the token | check `GITHUB_TOKEN` and the service source env vars |
-| a tick returns `skipped` with a `reason` | the service decided to skip | normal: e.g. interval not elapsed, quiet hours, or disabled via `SERVICES_ENABLED` |
-| Continuous restarts after a push | anti-flapping guard (10 min) | expected: at most one restart every 10 minutes |
-| TUI cannot connect | wrong token or URL | check `MANAGER_URL` + the `X-Auth-Token` header (see API_GUIDELINES) |
+| Symptom                                                 | Cause                                   | Fix                                                                                     |
+| ------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------- |
+| `/status` shows `config_error: services.yaml not found` | no manifest on Render                   | set`MANIFEST_CONTENT` or `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
+| Service`"loaded": false` in `/services`                 | missing env vars or import error        | the`error` field says exactly what is missing                                           |
+| `POST /<service>/...` → 502 remote host unreachable     | ssh key/host/user issues                | check that service's ssh env vars and the key Secret File on Render                     |
+| `fetch` errors 404 in `/tick`                           | private repo unreachable with the token | check`GITHUB_TOKEN` and the service source env vars                                     |
+| a tick returns`skipped` with a `reason`                 | the service decided to skip             | normal: e.g. interval not elapsed, quiet hours, or disabled via`SERVICES_ENABLED`       |
+| Continuous restarts after a push                        | anti-flapping guard (10 min)            | expected: at most one restart every 10 minutes                                          |
+| TUI cannot connect                                      | wrong token or URL                      | check`MANAGER_URL` + the `X-Auth-Token` header (see API_GUIDELINES)                     |
