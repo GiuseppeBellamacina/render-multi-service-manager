@@ -14,11 +14,12 @@ or click the tabs):
 Global keys (work from any view, even while typing in an input):
   ctrl+t  run a global tick            ctrl+f  fetch scripts from GitHub
   ctrl+r  refresh all data             ctrl+a  auto-refresh every 30s
-  ctrl+l  show / hide the activity log T       cycle the color theme
+  ctrl+l  show / hide the activity log ctrl+e  enable / disable the selected service
+  T       cycle the color theme
   q       quit
 
 View keys: 1 / 2 / 3 (or F1 / F2 / F3, which also work while typing).
-The plain letters (t f r a l) work whenever no input field is focused.
+The plain letters (t f r a l e) work whenever no input field is focused.
 
 Feedback model: every operation registers in the op status line (spinner +
 elapsed time), ends with a toast, and leaves a line in the activity log at
@@ -578,6 +579,7 @@ class ManagerTUI(App):
         Binding("ctrl+r", "refresh", "Refresh", priority=True),
         Binding("ctrl+a", "auto_toggle", "Auto 30s", priority=True),
         Binding("ctrl+l", "toggle_log", "Log", priority=True),
+        Binding("ctrl+e", "toggle_service", "On/Off", priority=True),
         # view switching: plain digits when no input has focus, F-keys always
         Binding("1", "view('ops')", "Operations", show=False),
         Binding("2", "view('sources')", "Sources", show=False),
