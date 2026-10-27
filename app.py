@@ -58,7 +58,7 @@ try:
 except ImportError:  # pragma: no cover
     pass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -263,6 +263,21 @@ for _n, _s in SERVICES.items():
         PUBLIC_PREFIXES.append(
             f"{_mount}{_p}" if _p.startswith("/") else f"{_mount}/{_p}"
         )
+
+# -- Runtime on/off overrides (TUI toggle) ------------------------------------
+# name -> bool; wins over SERVICES_ENABLED. Own file (not manager_state.json):
+# /tick loads and re-saves that one, which would clobber a concurrent toggle.
+# shortcut: ephemeral on Render (lost on restart), set SERVICES_ENABLED to make it durable.
+OVERRIDES_FILE = STATE_DIR / "service_overrides.json"
+try:
+    OVERRIDES: dict[str, bool] = json.loads(OVERRIDES_FILE.read_text())
+except Exception:
+    OVERRIDES = {}
+
+
+def _is_enabled(name: str) -> bool:
+    return OVERRIDES.get(name, name in SERVICES_ENABLED)
+
 
 # -- Local state (ephemeral on Render: best-effort, by design) ----------------
 
@@ -536,8 +551,8 @@ async def _exec_action(name: str, action_spec: dict) -> dict:
 async def _scheduled_run(name: str, state: dict) -> dict:
     """Run a service's tick inside the global /tick, according to its
     schedule: every_tick - interval_minutes - disabled."""
-    if name not in SERVICES_ENABLED:
-        return {"skipped": True, "reason": "disabled (SERVICES_ENABLED)"}
+    if not _is_enabled(name):
+        return {"skipped": True, "reason": "disabled"}
     entry = REGISTRY.get(name, {})
     if not entry.get("ok"):
         return {"skipped": True, "reason": entry.get("error", "service not loaded")}
@@ -944,7 +959,7 @@ def services_list() -> dict:
             "description": (svc.get("description") or "").strip(),
             "loaded": REGISTRY.get(name, {}).get("ok", False),
             "error": REGISTRY.get(name, {}).get("error"),
-            "enabled": name in SERVICES_ENABLED,
+            "enabled": _is_enabled(name),
             "source": {
                 "repo": src.get("repo"),
                 "branch": src.get("branch"),
@@ -971,6 +986,21 @@ def service_info(name: str) -> JSONResponse:
     return JSONResponse(full[name])
 
 
+@app.post("/services/{name}/enable")
+@app.post("/services/{name}/disable")
+def service_toggle(name: str, request: Request) -> JSONResponse:
+    """Switch a service on/off at runtime (its /tick and actions are skipped when off)."""
+    if name not in SERVICES:
+        return JSONResponse({"detail": f"unknown service: {name}"}, 404)
+    OVERRIDES[name] = request.url.path.endswith("/enable")
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        OVERRIDES_FILE.write_text(json.dumps(OVERRIDES))
+    except Exception as exc:
+        _log.warning("overrides save failed: %s", exc)
+    return JSONResponse({"service": name, "enabled": OVERRIDES[name]})
+
+
 @app.get("/services/{name}/{action}")
 @app.post("/services/{name}/{action}")
 async def service_action(name: str, action: str) -> JSONResponse:
@@ -984,8 +1014,8 @@ async def service_action(name: str, action: str) -> JSONResponse:
         return JSONResponse(
             {"detail": f"unknown action: {action} (available: {known})"}, 404
         )
-    if name not in SERVICES_ENABLED:
-        return JSONResponse({"skipped": True, "reason": "disabled (SERVICES_ENABLED)"})
+    if not _is_enabled(name):
+        return JSONResponse({"skipped": True, "reason": "disabled"})
     entry = REGISTRY.get(name, {})
     if not entry.get("ok"):
         return JSONResponse(
@@ -1003,7 +1033,7 @@ async def status() -> dict:
         entry = REGISTRY.get(name, {})
         info = {
             "loaded": entry.get("ok", False),
-            "enabled": name in SERVICES_ENABLED,
+            "enabled": _is_enabled(name),
             "error": entry.get("error"),
         }
         # per-service status (when the action is configured) - read-only, isolated

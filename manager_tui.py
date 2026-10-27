@@ -571,6 +571,7 @@ class ManagerTUI(App):
         Binding("a", "auto_toggle", "Auto", show=False),
         Binding("l", "toggle_log", "Log", show=False),
         Binding("T", "cycle_theme", "Theme", show=False),
+        Binding("e", "toggle_service", "On/Off", show=False),
         # modifier versions always work, even while typing in an input
         Binding("ctrl+t", "tick", "Tick", priority=True),
         Binding("ctrl+f", "fetch", "Fetch", priority=True),
@@ -919,6 +920,26 @@ class ManagerTUI(App):
             name="op-refresh-manual",
             group="op-refresh",
         )
+
+    def action_toggle_service(self) -> None:
+        name = self._selected
+        if name not in self._services:
+            self.notify("select a service first", severity="warning", markup=False)
+            return
+        self._spawn(self._op_toggle(name), name=f"op-toggle-{name}", group=f"svc-{name}")
+
+    async def _op_toggle(self, name: str) -> None:
+        verb = "disable" if self._services[name].get("enabled") else "enable"
+        try:
+            resp = await self.api.post(f"/services/{name}/{verb}", timeout=30.0)
+        except Exception as exc:
+            self.notify(f"{verb} failed: {exc}", severity="error", markup=False)
+            return
+        if resp.status_code != 200:
+            self.notify(f"{verb} → HTTP {resp.status_code}", severity="error", markup=False)
+            return
+        self.notify(f"{name}: {verb}d", markup=False)
+        await self._refresh_data(manual=True)
 
     def action_auto_toggle(self) -> None:
         self._set_auto(not self._auto)
