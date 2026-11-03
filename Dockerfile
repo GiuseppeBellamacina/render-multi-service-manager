@@ -1,13 +1,6 @@
 # render-service-manager - single manager for multiple scheduled services.
-# Docker (not the native runtime) because a managed service may need the
-# `ssh` and `scp` binaries at runtime (subprocess), and Render's native
-# Python runtime does not guarantee them.
+# Docker keeps the runtime reproducible (same image locally and on Render).
 FROM python:3.12-slim
-
-# ssh/scp required at runtime by the cluster driver service (t2g): ssh tick
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

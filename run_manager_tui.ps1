@@ -5,13 +5,12 @@
 #     .\run_manager_tui.ps1
 #     .\run_manager_tui.ps1 -Url https://your-manager-url
 #
-# Reads URL and tokens from .env (MANAGER_URL, MANAGER_AUTH_TOKEN, T2G_AUTH_TOKEN)
+# Reads URL and tokens from .env (MANAGER_URL, MANAGER_AUTH_TOKEN)
 # or from CLI flags. Stop: Ctrl+C or 'q'.
 # ============================================================================
 param(
     [string]$Url,
-    [string]$Token,
-    [string]$T2gToken
+    [string]$Token
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +33,6 @@ try {
     # -- Resolve params (CLI > env) --
     if (-not $Url) { $Url = $Env:MANAGER_URL }
     if (-not $Token) { $Token = $Env:MANAGER_AUTH_TOKEN }
-    if (-not $T2gToken) { $T2gToken = $Env:T2G_AUTH_TOKEN }
 
     # -- Require a manager URL (no hardcoded fallback) --
     if (-not $Url) {
@@ -58,7 +56,7 @@ try {
         }
     }
 
-    $runArgs = @("manager_tui.py", "--url", $Url, "--token", $Token, "--t2g-token", $T2gToken)
+    $runArgs = @("manager_tui.py", "--url", $Url, "--token", $Token)
     & .\.venv\Scripts\python.exe @runArgs
 } finally {
     Pop-Location

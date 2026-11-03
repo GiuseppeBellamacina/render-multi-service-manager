@@ -22,13 +22,13 @@ Lifecycle:
    request). If content changed -> clean process restart that reloads the
    fresh code (Render relaunches the container), with an anti-flapping guard.
 4. `GET|POST /services/{name}/{action}`: invoke ONE service's action
-   (e.g. /services/t2g/tick, /services/committer/status).
+   (e.g. /services/committer/tick, /services/credit/status).
 5. The sub-apps mounted at /{name}/* expose the services' ORIGINAL APIs
-   (the t2g TUI points at .../t2g, the credit dashboard at .../credit).
+   (the credit dashboard points at .../credit).
 
 Security: `MANAGER_AUTH_TOKEN` (optional, recommended on Render) protects
-EVERY route except /health and the manifest's `public_paths`; it also
-accepts `T2G_AUTH_TOKEN` so the TUI keeps working. The token travels ONLY
+EVERY route except /health and the manifest's `public_paths`. The
+token travels ONLY
 in the `X-Auth-Token` header (never in the query string: it would end up
 in logs). No token or key is ever logged.
 """
@@ -45,7 +45,7 @@ import re
 import secrets
 import sys
 import time
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -114,7 +114,7 @@ def _ensure_manifest() -> None:
     """Resolve the SECRET manifest (services.yaml is gitignored).
 
     Priority: MANIFEST_CONTENT env var (the whole YAML, literal \\n allowed,
-    normalized like T2G_SSH_KEY_CONTENT) > MANIFEST_REPO env var (a private
+    with its escaped newlines restored) > MANIFEST_REPO env var (a private
     GitHub repository: MANIFEST_BRANCH default "main", MANIFEST_PATH default
     "services.yaml", fetched via the Contents API with GITHUB_TOKEN) >
     MANIFEST_FILE env var (an explicit file path, e.g. /etc/secrets/
@@ -233,7 +233,6 @@ def _env_int(name: str, default: int) -> int:
 # -- The manager's own config -------------------------------------------------
 
 MANAGER_AUTH_TOKEN = os.environ.get("MANAGER_AUTH_TOKEN", "")
-T2G_AUTH_TOKEN = os.environ.get("T2G_AUTH_TOKEN", "")
 SERVICES_ENABLED = {
     s.strip()
     for s in os.environ.get("SERVICES_ENABLED", ",".join(SERVICES.keys())).split(",")
@@ -304,39 +303,6 @@ def _now() -> datetime:
 def _today_key() -> str:
     """Local day (same TZ as the committer): used for the daily fetch."""
     return (_now() + timedelta(hours=TZ_OFFSET_H)).strftime("%Y-%m-%d")
-
-
-# -- Render Secret Files normalization ----------------------------------------
-
-
-def _normalize_ssh_key_file() -> None:
-    """When T2G_SSH_KEY_FILE points to a Render Secret File (under
-    /etc/secrets), copy it to a local file with 0600 permissions and point
-    the env var at the copy: ssh strictly rejects keys with open
-    permissions, and we do not control the Secret File mount's mode.
-    Runs BEFORE the service modules load (they read the env at import)."""
-    key_file = os.environ.get("T2G_SSH_KEY_FILE", "").strip()
-    if not key_file or not key_file.startswith("/etc/secrets/"):
-        return
-    src = Path(key_file)
-    if not src.is_file():
-        _log.warning(
-            "T2G_SSH_KEY_FILE %s not found: the t2g service will fail its ssh",
-            key_file,
-        )
-        return
-    dest = BASE_DIR / "data" / "ssh_key"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    # Windows CRLF in the key would break ssh on Linux ("error in libcrypto")
-    content = src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    dest.write_bytes(content)
-    # Best-effort on Windows/containers where chmod is a no-op or denied: the
-    # key is already written, so a failed permission tightening must not abort
-    # the boot (ssh only refuses to use it on POSIX, where chmod does work).
-    with suppress(OSError):
-        os.chmod(dest, 0o600)
-    os.environ["T2G_SSH_KEY_FILE"] = str(dest)
-    _log.info("ssh key copied from Render secret file to %s (0600)", dest)
 
 
 # -- Service loading (config-driven) ------------------------------------------
@@ -719,9 +685,6 @@ async def lifespan(app: FastAPI):
     SERVICES_DIR.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # normalize a Render Secret File ssh key BEFORE the services load
-    _normalize_ssh_key_file()
-
     # 1) seed from fallbacks (best-effort) 2) fresh fetch (best-effort)
     try:
         sources.ensure_local_copies(SERVICES_DIR, FALLBACK_DIR, CONFIG)
@@ -778,8 +741,7 @@ app = FastAPI(
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """When MANAGER_AUTH_TOKEN is set, EVERY route except /health and the
-    manifest's public_paths requires the X-Auth-Token header. Also accepts
-    T2G_AUTH_TOKEN: the TUI keeps working pointed at /t2g.
+    manifest's public_paths requires the X-Auth-Token header.
     The token is NOT accepted in the query string (it would end up in logs)."""
 
     async def dispatch(self, request, call_next):
@@ -795,10 +757,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
         token = request.headers.get("x-auth-token", "")
-        valid = secrets.compare_digest(token, MANAGER_AUTH_TOKEN) or (
-            bool(T2G_AUTH_TOKEN) and secrets.compare_digest(token, T2G_AUTH_TOKEN)
-        )
-        if not valid:
+        if not secrets.compare_digest(token, MANAGER_AUTH_TOKEN):
             return JSONResponse({"detail": "missing or invalid X-Auth-Token"}, 401)
         return await call_next(request)
 
@@ -887,8 +846,6 @@ async def tick() -> JSONResponse:
                 if isinstance(data, dict):
                     if "status" in data and data["status"] == "sleeping":
                         hint = "sleeping (outside working hours)"
-                    elif "cluster_reachable" in data:
-                        hint = f"cluster {'reachable' if data['cluster_reachable'] else 'UNREACHABLE'}"
                     elif "entry" in data and isinstance(data["entry"], dict):
                         bal = data["entry"].get("balance")
                         if bal is not None:
@@ -1005,7 +962,7 @@ def service_toggle(name: str, request: Request) -> JSONResponse:
 @app.post("/services/{name}/{action}")
 async def service_action(name: str, action: str) -> JSONResponse:
     """ONE service's action, by name, from the manifest:
-    e.g. GET /services/t2g/status - POST /services/committer/tick."""
+    e.g. GET /services/credit/status - POST /services/committer/tick."""
     if name not in SERVICES:
         return JSONResponse({"detail": f"unknown service: {name}"}, 404)
     action_spec = (SERVICES[name].get("actions") or {}).get(action)

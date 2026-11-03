@@ -15,7 +15,7 @@ cron-job.org ──GET/POST /tick (X-Auth-Token)──▶  Render (Docker, singl
 
 ## Why Docker
 
-A managed service may need `ssh`/`scp` at runtime (for example to reach a remote host over SSH): it runs them **via subprocess**, so the binaries must exist in the runtime. Render's official docs list the tools shipped with the _native_ Python runtime (Debian 12: curl, git, rsync, ...) and **`ssh`/`scp` are not among them**, nor is there a supported way to install system packages in the native runtime ([native runtimes — tools and utilities](https://render.com/docs/native-runtimes#tools-and-utilities)). With Docker, the `Dockerfile` installs `openssh-client` explicitly — guaranteed. Free tier RAM is the same 512 MB in both runtimes ([compute plans](https://render.com/docs/compute-plans)).
+The same image runs locally and on Render, so what you test is what gets deployed. Free tier RAM is 512 MB ([compute plans](https://render.com/docs/compute-plans)).
 
 **Does Docker start automatically on Render?** Yes. A Docker web service is built and launched by the platform on every deploy or restart — you never start it manually. This is also what backs the manager's restart-on-script-update: the process exits after flushing the response, and Render relaunches the container with the fresh code. (Local Docker Desktop, by contrast, must be started by you for local container tests.)
 
@@ -29,7 +29,7 @@ A managed service may need `ssh`/`scp` at runtime (for example to reach a remote
 ├── services.yaml.example    # public reference manifest
 ├── pyproject.toml           # dependencies of ALL services (union) + tool config — see Limitations
 ├── uv.lock                  # exact pinned versions: what the image installs
-├── Dockerfile               # python:3.12-slim + openssh-client + uv
+├── Dockerfile               # python:3.12-slim + uv
 ├── .env.example             # environment variables template
 ├── format.ps1               # isort + black + ruff (tools from .venv)
 ├── README.md                # this file
@@ -42,14 +42,14 @@ Runtime directories (`services/`, `state/`, `data/`, `state.json`) are generated
 
 The manifest is **secret**: it describes your services and their repos, so it is gitignored and **never published** — the repo ships `services.yaml.example` as a public reference. At boot the manager resolves the real manifest in this order:
 
-1. **`MANIFEST_CONTENT`** env var — the whole YAML as an env var (multiline with literal `\n`, exactly like an SSH key on Render);
+1. **`MANIFEST_CONTENT`** env var — the whole YAML as an env var (multiline with literal `\n`);
 2. **`MANIFEST_REPO`** env var — a **private GitHub repository** acting as a manifest deposit: the manager fetches `services.yaml` from it via the Contents API with `GITHUB_TOKEN` (optional `MANIFEST_BRANCH`, default `main`, and `MANIFEST_PATH`, default `services.yaml`);
 3. **`MANIFEST_FILE`** env var — an explicit file path, e.g. `/etc/secrets/services.yaml` when using a Render Secret File;
 4. a **local `services.yaml` file** (development; a Render Secret File linked at the app root lands here, and `/etc/secrets/services.yaml` is picked up automatically even without `MANIFEST_FILE`).
 
 If none is available, the manager still boots (health OK) but `/status` shows `config_error: services.yaml not found` and no service runs.
 
-On Render the simplest channel is a **Secret File** (dashboard → Environment → Secret Files): upload the plain multiline `services.yaml` with filename `services.yaml` — Render mounts it under `/etc/secrets/` and links it at the app root, so the manager reads it as the local file (and if only the `/etc/secrets` copy exists, the manager copies it from there). With the Secret File in place you can leave `MANIFEST_CONTENT` and `MANIFEST_REPO` unset (`MANIFEST_FILE=/etc/secrets/services.yaml` makes the pointer explicit — optional). The same mechanism works for any other secret a service needs (e.g. an SSH private key): upload it as a Secret File (e.g. `my_ssh_key`, plain multiline) and point the service's key-file env var at `/etc/secrets/my_ssh_key` — at boot the manager normalizes it to a local `0600` file, so ssh's strict key-permission check always passes.
+On Render the simplest channel is a **Secret File** (dashboard → Environment → Secret Files): upload the plain multiline `services.yaml` with filename `services.yaml` — Render mounts it under `/etc/secrets/` and links it at the app root, so the manager reads it as the local file (and if only the `/etc/secrets` copy exists, the manager copies it from there). With the Secret File in place you can leave `MANIFEST_CONTENT` and `MANIFEST_REPO` unset (`MANIFEST_FILE=/etc/secrets/services.yaml` makes the pointer explicit — optional).
 
 One block per service. Fields:
 
@@ -107,7 +107,7 @@ The published manifest contains no personal data: repos, owners and hosts live o
 
 ## Local run
 
-### Without Docker (recommended locally — a service that shells out to `ssh` reuses your `~/.ssh/config`)
+### Without Docker (recommended locally)
 
 ```powershell
 copy .env.example .env        # then fill in the values (set RESTART_ON_CHANGE=0 locally!)
@@ -124,20 +124,16 @@ The bundled TUI (`manager_tui.py`) can point at the manager: set `MANAGER_URL` a
 ```powershell
 docker build -t render-manager .
 docker run --rm -p 8000:10000 --env-file .env render-manager
-# NB: inside the container there are NO ~/.ssh/config aliases and no
-#     local keys: a service that needs ssh gets host/user/key from the
-#     env vars declared in its manifest (e.g. an SSH key Secret File)
 ```
 
 ## Deploying to Render (step by step)
 
 1. **Create a GitHub repository** and push this folder as is (the Dockerfile is already at the root — the build context is the root).
 2. **Render → New → Web Service** → connect the repo. There is no blueprint file: configure the service manually — **Runtime: Docker** (Render builds the `Dockerfile` at the repo root; the build context is the root), **Instance Type: Free**, and **Health Check Path: `/health`**.
-3. **Environment / Secret Files** (Render dashboard) — see the table below. **Secret File (recommended)**: `services.yaml` (the secret manifest, plain multiline YAML) via Environment → Secret Files — plus one more Secret File for each key a service needs (e.g. `my_ssh_key`). Then the env vars at minimum: `MANAGER_AUTH_TOKEN`, `GITHUB_TOKEN` (if any service uses `mode: api`), and every `${VAR}` placeholder your manifest references (e.g. `TICKER_REPO`, `SAMPLER_REPO`, `SAMPLER_API_KEY`). `MANIFEST_CONTENT`/`MANIFEST_REPO` are the env-var alternatives if you prefer them over the Secret File.
-4. **Dedicated SSH key** (only if a service shells out to ssh): `ssh-keygen -t ed25519 -f ~/.ssh/my_ssh_key -N ""`, authorize it on the remote host, then deliver it as a Secret File (recommended, see step 3) or paste it on Render with literal `\n`: `awk '{printf "%s\\n", $0}' ~/.ssh/my_ssh_key`.
-5. **cron-job.org**: ONE cron job, every 5 minutes, `GET https://<your-manager>.onrender.com/tick` with header `X-Auth-Token: <MANAGER_AUTH_TOKEN>` and a generous timeout (90-120 s, cold starts).
-6. **Shut down the old services** and their crons (the manager replaces them).
-7. **TUI** (optional): point it at `https://<your-manager>.onrender.com` with `MANAGER_AUTH_TOKEN` (set both in `.env`).
+3. **Environment / Secret Files** (Render dashboard) — see the table below. **Secret File (recommended)**: `services.yaml` (the secret manifest, plain multiline YAML) via Environment → Secret Files. Then the env vars at minimum: `MANAGER_AUTH_TOKEN`, `GITHUB_TOKEN` (if any service uses `mode: api`), and every `${VAR}` placeholder your manifest references (e.g. `TICKER_REPO`, `SAMPLER_REPO`, `SAMPLER_API_KEY`). `MANIFEST_CONTENT`/`MANIFEST_REPO` are the env-var alternatives if you prefer them over the Secret File.
+4. **cron-job.org**: ONE cron job, every 5 minutes, `GET https://<your-manager>.onrender.com/tick` with header `X-Auth-Token: <MANAGER_AUTH_TOKEN>` and a generous timeout (90-120 s, cold starts).
+5. **Shut down the old services** and their crons (the manager replaces them).
+6. **TUI** (optional): point it at `https://<your-manager>.onrender.com` with `MANAGER_AUTH_TOKEN` (set both in `.env`).
 
 ## Environment variables
 
@@ -169,7 +165,6 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 | ------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------- |
 | `/status` shows `config_error: services.yaml not found` | no manifest on Render                   | set`MANIFEST_CONTENT` or `MANIFEST_REPO` (+ optional `MANIFEST_BRANCH`/`MANIFEST_PATH`) |
 | Service`"loaded": false` in `/services`                 | missing env vars or import error        | the`error` field says exactly what is missing                                           |
-| `POST /<service>/...` → 502 remote host unreachable     | ssh key/host/user issues                | check that service's ssh env vars and the key Secret File on Render                     |
 | `fetch` errors 404 in `/tick`                           | private repo unreachable with the token | check`GITHUB_TOKEN` and the service source env vars                                     |
 | a tick returns`skipped` with a `reason`                 | the service decided to skip             | normal: e.g. interval not elapsed, quiet hours, or disabled via`SERVICES_ENABLED`       |
 | Continuous restarts after a push                        | anti-flapping guard (10 min)            | expected: at most one restart every 10 minutes                                          |

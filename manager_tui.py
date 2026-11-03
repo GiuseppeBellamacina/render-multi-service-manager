@@ -29,8 +29,8 @@ Usage:
     .venv\\Scripts\\python.exe manager_tui.py
     .\\run_manager_tui.ps1
 
-    python manager_tui.py --url https://... --token ... --t2g-token ...
-    (falls back to MANAGER_URL / MANAGER_AUTH_TOKEN / T2G_AUTH_TOKEN or .env)
+    python manager_tui.py --url https://... --token ...
+    (falls back to MANAGER_URL / MANAGER_AUTH_TOKEN or .env)
 """
 
 from __future__ import annotations
@@ -82,7 +82,6 @@ except ImportError:
 
 DEFAULT_URL = os.environ.get("MANAGER_URL", "")
 DEFAULT_TOKEN = os.environ.get("MANAGER_AUTH_TOKEN", "")
-DEFAULT_T2G_TOKEN = os.environ.get("T2G_AUTH_TOKEN", "")
 
 AUTO_REFRESH_S = 30
 THEMES = [
@@ -98,10 +97,8 @@ THEMES = [
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 # dest -> repo_path remap: the /services manifest only exposes dest paths,
-# but GitHub wants the repository path (t2g/committer/credit differ).
+# but GitHub wants the repository path (committer/credit differ).
 SOURCE_REMAPS = [
-    ("t2g/app.py", "remote/app.py"),
-    ("t2g/cluster_helper.sh", "remote/cluster_helper.sh"),
     ("committer/app.py", "app.py"),
     ("credit/main.py", "backend/main.py"),
 ]
@@ -179,30 +176,23 @@ class ApiResponse:
 
 
 class ManagerAPI:
-    """Thin async HTTP client for the render-service-manager.
+    """Thin async HTTP client for the render-service-manager (X-Auth-Token = manager token)."""
 
-    Auth: every path under /t2g (and the t2g service's own actions) uses the
-    T2G token; everything else uses the manager token. Matches the backend's
-    AuthMiddleware, which accepts either token for manager routes.
-    """
-
-    def __init__(self, base_url: str, token: str = "", t2g_token: str = ""):
+    def __init__(self, base_url: str, token: str = ""):
         self.base = base_url.rstrip("/")
         self.token = token
-        self.t2g_token = t2g_token
         self._client = httpx.AsyncClient(follow_redirects=True)
 
-    def _headers(self, use_t2g: bool) -> dict:
-        tok = self.t2g_token if use_t2g else self.token
-        return {"X-Auth-Token": tok} if tok else {}
+    def _headers(self) -> dict:
+        return {"X-Auth-Token": self.token} if self.token else {}
 
     async def request(
-        self, method: str, path: str, *, use_t2g: bool = False, timeout: float = 60.0
+        self, method: str, path: str, *, timeout: float = 60.0
     ) -> ApiResponse:
         resp = await self._client.request(
             method,
             f"{self.base}{path}",
-            headers=self._headers(use_t2g),
+            headers=self._headers(),
             timeout=timeout,
         )
         try:
@@ -214,15 +204,11 @@ class ManagerAPI:
         )
         return ApiResponse(resp.status_code, body, resp.text, elapsed)
 
-    async def get(
-        self, path: str, *, use_t2g: bool = False, timeout: float = 60.0
-    ) -> ApiResponse:
-        return await self.request("GET", path, use_t2g=use_t2g, timeout=timeout)
+    async def get(self, path: str, *, timeout: float = 60.0) -> ApiResponse:
+        return await self.request("GET", path, timeout=timeout)
 
-    async def post(
-        self, path: str, *, use_t2g: bool = False, timeout: float = 60.0
-    ) -> ApiResponse:
-        return await self.request("POST", path, use_t2g=use_t2g, timeout=timeout)
+    async def post(self, path: str, *, timeout: float = 60.0) -> ApiResponse:
+        return await self.request("POST", path, timeout=timeout)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -594,13 +580,11 @@ class ManagerTUI(App):
         self,
         url: str = DEFAULT_URL,
         token: str = DEFAULT_TOKEN,
-        t2g_token: str = DEFAULT_T2G_TOKEN,
     ):
         super().__init__()
         self.url = url
         self.token = token
-        self.t2g_token = t2g_token
-        self.api = ManagerAPI(url, token, t2g_token)
+        self.api = ManagerAPI(url, token)
         self.ops = OpTracker()
 
         # caches straight from the backend
@@ -738,7 +722,7 @@ class ManagerTUI(App):
                         allow_blank=False,
                     )
                     yield Input(
-                        placeholder="/t2g/status  /credit/api/data  /services/committer/tick …",
+                        placeholder="/credit/api/data  /services/committer/tick …",
                         id="route-input",
                         suggester=self._route_suggester,
                     )
@@ -1123,7 +1107,7 @@ class ManagerTUI(App):
             lines.append(Text("401 — the manager rejected the token.", "b"))
             lines.append(
                 Text(
-                    "  Check --token (MANAGER_AUTH_TOKEN) or --t2g-token (T2G_AUTH_TOKEN).",
+                    "  Check --token (MANAGER_AUTH_TOKEN).",
                     "dim",
                 )
             )
@@ -1738,10 +1722,7 @@ class ManagerTUI(App):
         output_panel.loading = True
         status_w.update(Text(f"GET /services/{svc}/{action} — running…", "dim"))
         try:
-            # the t2g service's actions authenticate with the T2G token
-            resp = await self.api.get(
-                f"/services/{svc}/{action}", use_t2g=(svc == "t2g"), timeout=120.0
-            )
+            resp = await self.api.get(f"/services/{svc}/{action}", timeout=120.0)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1810,10 +1791,6 @@ class ManagerTUI(App):
 
     def _render_route_note(self) -> None:
         note = "send a GET/POST to any manager or service route · enter to send"
-        if self.t2g_token:
-            note += " · paths under /t2g use the T2G token, others the manager token"
-        else:
-            note += " · no T2G token configured: /t2g routes may return 401"
         self.query_one("#route-note", Static).update(Text(note, "dim"))
 
     def _update_route_suggestions(self) -> None:
@@ -1868,11 +1845,10 @@ class ManagerTUI(App):
         panel = self.query_one("#route-output-panel", Vertical)
         panel.loading = True
         try:
-            use_t2g = path.startswith("/t2g")
             if method == "POST":
-                resp = await self.api.post(path, use_t2g=use_t2g, timeout=90.0)
+                resp = await self.api.post(path, timeout=90.0)
             else:
-                resp = await self.api.get(path, use_t2g=use_t2g, timeout=90.0)
+                resp = await self.api.get(path, timeout=90.0)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -2063,7 +2039,7 @@ class ManagerTUI(App):
 
     @staticmethod
     def _remap_source_path(file_dest: str) -> str:
-        """dest path → repo path (t2g/committer/credit layouts differ)."""
+        """dest path → repo path (committer/credit layouts differ)."""
         for dest_prefix, repo_prefix in SOURCE_REMAPS:
             if file_dest == dest_prefix:
                 return repo_prefix
@@ -2225,11 +2201,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="render-service-manager TUI")
     parser.add_argument("--url", default=DEFAULT_URL, help="Manager URL")
     parser.add_argument("--token", default=DEFAULT_TOKEN, help="MANAGER_AUTH_TOKEN")
-    parser.add_argument("--t2g-token", default=DEFAULT_T2G_TOKEN, help="T2G_AUTH_TOKEN")
     args = parser.parse_args()
     if not args.url.strip():
         parser.error("no manager URL: set MANAGER_URL in .env or pass --url <url>")
-    app = ManagerTUI(url=args.url, token=args.token, t2g_token=args.t2g_token)
+    app = ManagerTUI(url=args.url, token=args.token)
     app.run()
 
 

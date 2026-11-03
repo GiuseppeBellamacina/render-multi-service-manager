@@ -4,7 +4,7 @@
 # The REAL services.yaml is SECRET (gitignored, never published): at boot
 # the manager resolves it in this order:
 #   1. MANIFEST_CONTENT env var  — the whole YAML as an env var (multiline,
-#                                  escaped newlines, like an SSH key on Render)
+#                                  escaped newlines)
 #   2. MANIFEST_REPO env var     — a (private) GitHub repository:
 #                                  MANIFEST_BRANCH (default: main) +
 #                                  MANIFEST_PATH (default: services.yaml),
