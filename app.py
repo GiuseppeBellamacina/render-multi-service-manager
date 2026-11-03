@@ -41,7 +41,6 @@ import inspect
 import json
 import logging
 import os
-import platform
 import re
 import secrets
 import sys
@@ -1052,24 +1051,6 @@ async def status() -> dict:
         "services": services,
         "last_fetch_day": state.get("last_fetch_day"),
         "last_tick": state.get("last_tick"),
-    }
-
-
-@app.get("/diag/network")
-def diag_network() -> dict:
-    """Can this container run a VPN client? (tun/ppp devices, NET_ADMIN, uid.)"""
-    cap_eff = 0
-    with suppress(OSError, ValueError, IndexError):
-        for line in Path("/proc/self/status").read_text().splitlines():
-            if line.startswith("CapEff:"):
-                cap_eff = int(line.split()[1], 16)
-    return {
-        "platform": platform.platform(),
-        "uid": os.getuid() if hasattr(os, "getuid") else None,
-        "dev_net_tun": os.path.exists("/dev/net/tun"),
-        "dev_ppp": os.path.exists("/dev/ppp"),
-        "cap_net_admin": bool(cap_eff & (1 << 12)),
-        "cap_eff": hex(cap_eff),
     }
 
 
