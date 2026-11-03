@@ -143,6 +143,8 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 
 The cluster no longer accepts SSH from outside the university network. To test from your PC, put `VPN_HOST`, `VPN_USER`, `VPN_PASSWORD` in `.env` (see `.env.example`) and run `.pn.ps1 -Action connect | status | test | disconnect`. It uses the built-in Windows L2TP/IPsec client with a split tunnel (only the cluster IP goes through the VPN). L2TP/IPsec cannot run inside a Render container: Render needs a jump host that holds the VPN.
 
+`.un_local.ps1 [-TickMinutes N] [-NoVpn]` does it all: VPN up, manager on `127.0.0.1:8765` with only t2g enabled (the committer stays on Render), optional `POST /tick` every N minutes, and on Ctrl+C it stops everything and disconnects the VPN.
+
 ## Environment variables
 
 | Variable              | Required      | Notes                                                                                                                                                                                                     |
