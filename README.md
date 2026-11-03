@@ -139,6 +139,10 @@ docker run --rm -p 8000:10000 --env-file .env render-manager
 6. **Shut down the old services** and their crons (the manager replaces them).
 7. **TUI** (optional): point it at `https://<your-manager>.onrender.com` with `MANAGER_AUTH_TOKEN` (set both in `.env`).
 
+## Local VPN test (Windows)
+
+The cluster no longer accepts SSH from outside the university network. To test from your PC, put `VPN_HOST`, `VPN_USER`, `VPN_PASSWORD` in `.env` (see `.env.example`) and run `.pn.ps1 -Action connect | status | test | disconnect`. It uses the built-in Windows L2TP/IPsec client with a split tunnel (only the cluster IP goes through the VPN). L2TP/IPsec cannot run inside a Render container: Render needs a jump host that holds the VPN.
+
 ## Environment variables
 
 | Variable              | Required      | Notes                                                                                                                                                                                                     |
